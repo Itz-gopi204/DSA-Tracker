@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TUF Practice Tracker</title>
+  <meta name="description" content="Track Striver's A2Z sheet and the TUF+ DSA tracking sheet with checkboxes, revision counts, and notes saved in this browser.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560;9..144,640&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div>
+        <p class="eyebrow">Take You Forward</p>
+        <h1>Practice tracker</h1>
+        <p class="lede">Both sheets from your PDFs, with the same topics and problems. Check them off, count revisions, flag what to revisit, and leave a note. Everything stays in this browser.</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button type="button" id="export" class="btn">Export backup</button>
+      <button type="button" id="import" class="btn">Import</button>
+      <button type="button" id="reset" class="btn danger">Reset this sheet</button>
+      <input id="file" type="file" accept="application/json,.json" hidden>
+    </div>
+  </header>
+
+  <div class="deck">
+    <div class="tabs" id="tabs" role="tablist" aria-label="Sheets">
+      <button type="button" class="tab" id="tab-a2z" data-sheet="a2z" role="tab">
+        <span class="tab-kicker">Sheet 1 · A2Z checklist</span>
+        <span class="tab-title">Striver's A2Z Sheet</span>
+        <span class="tab-count" id="tab-a2z-count"></span>
+      </button>
+      <button type="button" class="tab" id="tab-tracking" data-sheet="tracking" role="tab">
+        <span class="tab-kicker">Sheet 2 · TUF+ tracking</span>
+        <span class="tab-title">TUF+ DSA Tracking Sheet</span>
+        <span class="tab-count" id="tab-tracking-count"></span>
+      </button>
+    </div>
+
+    <div class="toolbar">
+      <label class="search">
+        <span class="sr">Search problems</span>
+        <input id="q" type="search" placeholder="Search problems, topics, steps" autocomplete="off">
+      </label>
+      <div class="filters" id="filters" role="group" aria-label="Status">
+        <button type="button" data-status="all">All</button>
+        <button type="button" data-status="left">Still to do</button>
+        <button type="button" data-status="done">Completed</button>
+        <button type="button" data-status="revisit">Revisit</button>
+      </div>
+      <div class="filters" id="diffs" role="group" aria-label="Difficulty">
+        <button type="button" data-diff="all">Any level</button>
+        <button type="button" data-diff="easy">Easy</button>
+        <button type="button" data-diff="medium">Medium</button>
+        <button type="button" data-diff="hard">Hard</button>
+      </div>
+      <div class="toolbar-end">
+        <span id="shown"></span>
+        <button type="button" id="expand" class="texty">Expand</button>
+        <button type="button" id="collapse" class="texty">Collapse</button>
+      </div>
+    </div>
+  </div>
+
+  <section class="stats" aria-live="polite">
+    <div class="ring-wrap">
+      <svg class="ring" viewBox="0 0 36 36" aria-hidden="true">
+        <circle class="ring-bg" cx="18" cy="18" r="15.5"></circle>
+        <circle class="ring-fg" id="ring" cx="18" cy="18" r="15.5"></circle>
+      </svg>
+      <div class="ring-label">
+        <strong id="ring-pct">0%</strong>
+        <span>done</span>
+      </div>
+    </div>
+    <div class="metrics">
+      <article>
+        <span>Completed</span>
+        <strong id="m-done">0</strong>
+        <small id="m-done-sub"></small>
+      </article>
+      <article>
+        <span>Left</span>
+        <strong id="m-left">0</strong>
+        <small>not checked off</small>
+      </article>
+      <article>
+        <span id="m-rev-label">Revision</span>
+        <strong id="m-rev">0</strong>
+        <small id="m-rev-sub"></small>
+      </article>
+      <article>
+        <span>Revisit</span>
+        <strong id="m-revisit">0</strong>
+        <small>flagged to return</small>
+      </article>
+    </div>
+    <div class="upnext">
+      <div>
+        <span class="kicker" id="upnext-kicker">Up next</span>
+        <strong id="upnext-name">—</strong>
+        <span id="upnext-where"></span>
+      </div>
+      <div class="upnext-actions">
+        <button type="button" id="upnext-go" class="btn solid">Go to it</button>
+        <button type="button" id="surprise" class="btn">Random left</button>
+      </div>
+    </div>
+    <div class="diff-bars" id="diff-bars">
+      <div>
+        <span>Easy</span>
+        <b id="easy-label"></b>
+        <i><em id="easy-bar"></em></i>
+      </div>
+      <div>
+        <span>Medium</span>
+        <b id="medium-label"></b>
+        <i><em id="medium-bar"></em></i>
+      </div>
+      <div>
+        <span>Hard</span>
+        <b id="hard-label"></b>
+        <i><em id="hard-bar"></em></i>
+      </div>
+    </div>
+  </section>
+
+  <div class="layout">
+    <aside class="nav" id="nav" aria-label="Topics"></aside>
+    <main>
+      <p class="legend" id="legend"></p>
+      <div id="list"></div>
+    </main>
+  </div>
+
+  <footer>
+    <p>Progress is saved only in this browser. Use Export backup before you switch computers or clear site data.</p>
+  </footer>
+  <div id="toast" role="status"></div>
+  <noscript><p class="noscript">This tracker needs JavaScript so your checkboxes can be saved in the browser.</p></noscript>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
