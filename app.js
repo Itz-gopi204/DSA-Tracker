@@ -29,9 +29,29 @@
   let saveWarned = false;
   let toastTimer = 0;
   let nextId = "";
+  let db = null;
+  let syncTimer = 0;
 
   function blank() {
-    return { done: false, revision: false, revisions: 0, revisit: false, note: "", doneAt: "" };
+    return { done: false, revision: false, revisions: 0, revisit: false, note: "", doneAt: "", updatedAt: "", deleted: false };
+  }
+
+  function isProblemId(id) {
+    return id.startsWith("a2z-") || id.startsWith("tuf-");
+  }
+
+  function normalizeEntry(val) {
+    if (!val || typeof val !== "object") return null;
+    return {
+      done: !!val.done,
+      revision: !!val.revision,
+      revisions: Math.max(0, Number(val.revisions) || 0),
+      revisit: !!val.revisit,
+      note: typeof val.note === "string" ? val.note.slice(0, 4000) : "",
+      doneAt: typeof val.doneAt === "string" ? val.doneAt : "",
+      updatedAt: typeof val.updatedAt === "string" ? val.updatedAt : "",
+      deleted: !!val.deleted,
+    };
   }
 
   function loadProgress() {
@@ -40,15 +60,9 @@
       const out = {};
       if (!raw || typeof raw !== "object") return out;
       for (const [id, val] of Object.entries(raw)) {
-        if ((!id.startsWith("a2z-") && !id.startsWith("tuf-")) || !val || typeof val !== "object") continue;
-        out[id] = {
-          done: !!val.done,
-          revision: !!val.revision,
-          revisions: Math.max(0, Number(val.revisions) || 0),
-          revisit: !!val.revisit,
-          note: typeof val.note === "string" ? val.note.slice(0, 4000) : "",
-          doneAt: typeof val.doneAt === "string" ? val.doneAt : "",
-        };
+        if (!isProblemId(id)) continue;
+        const entry = normalizeEntry(val);
+        if (entry) out[id] = entry;
       }
       return out;
     } catch {
@@ -74,15 +88,23 @@
   const progress = loadProgress();
   const ui = loadUi();
 
-  function saveProgress() {
+  function saveLocal() {
     try {
       localStorage.setItem(KEY, JSON.stringify(progress));
+      return true;
     } catch {
       if (!saveWarned) {
         saveWarned = true;
-        toast("Progress could not be saved in this browser.");
+        toast("This browser blocked local saving. Connect Supabase so the checks have a database.");
       }
+      setStatus("error", "Not saved in this browser");
+      return false;
     }
+  }
+
+  function saveProgress() {
+    saveLocal();
+    scheduleSync();
   }
 
   function saveUi() {
@@ -110,22 +132,22 @@
 
   function entry(id) {
     const stored = progress[id];
-    return stored ? { ...blank(), ...stored } : blank();
+    if (!stored || stored.deleted) return blank();
+    return { ...blank(), ...stored, deleted: false };
   }
 
   function write(id, patch) {
     const cur = entry(id);
-    const next = { ...cur, ...patch };
+    const next = { ...cur, ...patch, deleted: false, updatedAt: new Date().toISOString() };
     if (Object.prototype.hasOwnProperty.call(patch, "done")) {
       if (next.done && !cur.done) next.doneAt = new Date().toISOString();
       if (!next.done) next.doneAt = "";
     }
     const empty =
       !next.done && !next.revision && !next.revisit && !next.note.trim() && !(next.revisions > 0) && !next.doneAt;
-    if (empty) delete progress[id];
-    else progress[id] = next;
+    progress[id] = empty ? { ...blank(), deleted: true, updatedAt: next.updatedAt } : next;
     saveProgress();
-    return next;
+    return entry(id);
   }
 
   function sectionsOf(which) {
@@ -760,14 +782,10 @@
         let kept = 0;
         for (const [id, val] of Object.entries(map)) {
           if ((!id.startsWith("a2z-") && !id.startsWith("tuf-")) || !val || typeof val !== "object") continue;
-          progress[id] = {
-            done: !!val.done,
-            revision: !!val.revision,
-            revisions: Math.max(0, Number(val.revisions) || 0),
-            revisit: !!val.revisit,
-            note: typeof val.note === "string" ? val.note.slice(0, 4000) : "",
-            doneAt: typeof val.doneAt === "string" ? val.doneAt : "",
-          };
+          const next = normalizeEntry(val);
+          if (!next) continue;
+          next.updatedAt = new Date().toISOString();
+          progress[id] = next;
           kept += 1;
         }
         saveProgress();
@@ -784,13 +802,124 @@
     const name = sheet() === "a2z" ? "A2Z sheet" : "TUF+ tracking sheet";
     if (!window.confirm("Clear every check, revision, revisit flag, and note on the " + name + "?")) return;
     const prefix = sheet() === "a2z" ? "a2z-" : "tuf-";
+    const now = new Date().toISOString();
     for (const id of Object.keys(progress)) {
-      if (id.startsWith(prefix)) delete progress[id];
+      if (id.startsWith(prefix)) progress[id] = { ...blank(), deleted: true, updatedAt: now };
     }
     saveProgress();
     render();
-    toast(name + " progress cleared on this browser.");
+    toast(name + " progress cleared.");
   });
 
+  function setStatus(kind, detail) {
+    const el = $("save-state");
+    if (!el) return;
+    el.className = "save-state " + kind;
+    if (kind === "local") el.textContent = "Saved on this browser";
+    else if (kind === "remote") el.textContent = "Saved to Supabase";
+    else if (kind === "saving") el.textContent = "Saving…";
+    else el.textContent = detail || "Database not saved";
+  }
+
+  function dbConfig() {
+    const file = window.TRACKER_CONFIG || {};
+    return {
+      url: String(file.supabaseUrl || "").trim(),
+      key: String(file.supabaseKey || "").trim(),
+    };
+  }
+
+  function replaceProgress(next) {
+    for (const id of Object.keys(progress)) delete progress[id];
+    Object.assign(progress, next);
+  }
+
+  function mergeProgress(local, remote) {
+    const out = {};
+    const ids = new Set([...Object.keys(local || {}), ...Object.keys(remote || {})]);
+    for (const id of ids) {
+      if (!isProblemId(id)) continue;
+      const left = local && local[id] ? normalizeEntry(local[id]) : null;
+      const right = remote && remote[id] ? normalizeEntry(remote[id]) : null;
+      if (left && right) out[id] = (left.updatedAt || "") >= (right.updatedAt || "") ? left : right;
+      else if (left) out[id] = left;
+      else if (right) out[id] = right;
+    }
+    return out;
+  }
+
+  function loadSdk() {
+    if (window.supabase && window.supabase.createClient) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("Could not load the Supabase client."));
+      document.head.appendChild(script);
+    });
+  }
+
+  function scheduleSync() {
+    if (!db) {
+      setStatus(saveWarned ? "error" : "local");
+      return;
+    }
+    setStatus("saving");
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => {
+      pushRemote();
+    }, 450);
+  }
+
+  async function pushRemote() {
+    if (!db) return;
+    setStatus("saving");
+    const loaded = await db.from("tracker").select("progress").eq("id", "main").maybeSingle();
+    if (loaded.error) {
+      setStatus("error", tableHint(loaded.error.message));
+      return;
+    }
+    const remote = loaded.data && loaded.data.progress ? loaded.data.progress : {};
+    const before = JSON.stringify(progress);
+    const merged = mergeProgress(progress, remote);
+    replaceProgress(merged);
+    saveLocal();
+    const saved = await db.from("tracker").upsert({
+      id: "main",
+      progress: merged,
+      updated_at: new Date().toISOString(),
+    });
+    if (saved.error) {
+      setStatus("error", tableHint(saved.error.message));
+      return;
+    }
+    setStatus("remote");
+    const typing = document.activeElement && document.activeElement.matches("textarea, input");
+    if (JSON.stringify(progress) !== before && !typing) render();
+  }
+
+  function tableHint(message) {
+    if (/relation|schema cache|does not exist|permission|row-level/i.test(message || "")) {
+      return "Connected, but the tracker table is missing. Run supabase.sql in the Supabase SQL editor.";
+    }
+    return "Saved on this browser. Database did not update.";
+  }
+
+  async function bootDatabase() {
+    const cfg = dbConfig();
+    if (!cfg.url || !cfg.key) {
+      setStatus("local");
+      return;
+    }
+    try {
+      await loadSdk();
+      db = window.supabase.createClient(cfg.url, cfg.key);
+      await pushRemote();
+    } catch (error) {
+      setStatus("error", error.message || "Could not connect to Supabase.");
+    }
+  }
+
   render();
+  bootDatabase();
 })();

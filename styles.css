@@ -644,6 +644,10 @@ textarea {
   color: var(--muted);
 }
 
+.save-state.remote { color: var(--done); }
+.save-state.saving { color: var(--accent); }
+.save-state.error { color: var(--hard); }
+
 footer { padding: 4px 0 36px; }
 
 footer p { margin: 0; font-size: 13px; }

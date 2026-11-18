@@ -17,7 +17,7 @@
       <div>
         <p class="eyebrow">Take You Forward</p>
         <h1>Practice tracker</h1>
-        <p class="lede">Both sheets from your PDFs, with the same topics and problems. Check them off, count revisions, flag what to revisit, and leave a note. Everything stays in this browser.</p>
+        <p class="lede">Both sheets from your PDFs, with the same topics and problems. Check them off, count revisions, flag what to revisit, and leave a note. Every check is saved to your Supabase project automatically.</p>
       </div>
     </div>
     <div class="top-actions">
@@ -60,6 +60,7 @@
         <button type="button" data-diff="hard">Hard</button>
       </div>
       <div class="toolbar-end">
+        <span id="save-state" class="save-state">Saved on this browser</span>
         <span id="shown"></span>
         <button type="button" id="expand" class="texty">Expand</button>
         <button type="button" id="collapse" class="texty">Collapse</button>
@@ -139,10 +140,11 @@
   </div>
 
   <footer>
-    <p>Progress is saved only in this browser. Use Export backup before you switch computers or clear site data.</p>
+    <p>Checks are stored in your Supabase project. Deploy this folder as-is and the live site uses the same database.</p>
   </footer>
   <div id="toast" role="status"></div>
   <noscript><p class="noscript">This tracker needs JavaScript so your checkboxes can be saved in the browser.</p></noscript>
+  <script src="config.js"></script>
   <script src="data.js"></script>
   <script src="app.js"></script>
 </body>
